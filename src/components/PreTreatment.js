@@ -1,114 +1,110 @@
-import React, { useState } from 'react';
+import React, { useMemo } from 'react';
 
 const PreTreatment = ({ waterData, pretreatment, setPretreatment, systemConfig }) => {
-  const [chemicalPrices, setChemicalPrices] = useState({ antiscalant: 4.5, sbs: 2.5 });
-
-  const handleInputChange = (key, value) => {
-    setPretreatment({ ...pretreatment, [key]: value });
-  };
-
-  const handlePriceChange = (key, value) => {
-    setChemicalPrices({ ...chemicalPrices, [key]: value });
-  };
-
-  // --- CALCULATIONS WITH SAFETY FALLBACKS ---
-  // If systemConfig is missing, we use 0 to prevent crashes
-  const feedFlow = Number(systemConfig?.feedFlow || 0); 
   
-  // Safe calculation using optional chaining for pretreatment doses
-  const antiscalantUsage = ((feedFlow * (pretreatment?.antiscalantDose || 0) * 24 * 30) / 1000).toFixed(2);
-  const antiscalantMonthlyCost = (antiscalantUsage * (chemicalPrices?.antiscalant || 0)).toFixed(2);
+  const scalingAnalysis = useMemo(() => {
+    const recovery = Number(systemConfig.recovery || 0) / 100;
+    if (recovery >= 1) return { lsi: 0, silicaSat: 0, cf: 1 };
 
-  const sbsUsage = ((feedFlow * (pretreatment?.sbsDose || 0) * 24 * 30) / 1000).toFixed(2);
-  const sbsMonthlyCost = (sbsUsage * (chemicalPrices?.sbs || 0)).toFixed(2);
+    // 1. Concentration Factor (CF)
+    // Formula: 1 / (1 - Recovery)
+    const CF = 1 / (1 - recovery);
 
-  const totalChemCost = (Number(antiscalantMonthlyCost) + Number(sbsMonthlyCost)).toFixed(2);
+    // 2. LSI (Langelier Saturation Index) Estimation
+    // This is a simplified version of the IMSDesign Stiff & Davis Index
+    const temp = Number(waterData.temp || 25);
+    const ph = Number(waterData.ph || 7.5);
+    const ca = Number(waterData.ca || 0) * CF; // Concentrated Calcium
+    const alkalinity = Number(waterData.hco3 || 0) * CF; // Concentrated Bicarbonate
+    const tds = (Number(waterData.na || 0) + Number(waterData.cl || 0)) * CF;
 
-  const cardStyle = { background: 'white', padding: '15px', borderRadius: '4px', border: '1px solid #c2d1df', marginBottom: '20px' };
-  const headerStyle = { background: '#004a80', color: 'white', padding: '8px', margin: '-15px -15px 15px -15px', fontWeight: 'bold' };
+    // pCa = -log10(Ca as CaCO3), pAlk = -log10(Alk), C = Temp/TDS constant
+    const pCa = 5.0 - Math.log10(ca * 2.5); 
+    const pAlk = 5.0 - Math.log10(alkalinity * 0.82);
+    const C = (Math.log10(tds) - 1) / 10 + (temp > 25 ? 2.0 : 2.3);
+    
+    const phs = C + pCa + pAlk;
+    const LSI = ph - phs;
+
+    // 3. Silica Scaling
+    // Silica solubility is approx 120 mg/L at 25°C
+    const silicaInConc = Number(waterData.sio2 || 0) * CF;
+    const silicaSat = (silicaInConc / 120) * 100;
+
+    return {
+      lsi: LSI.toFixed(2),
+      silicaSat: silicaSat.toFixed(1),
+      cf: CF.toFixed(2),
+      isLsiDanger: LSI > 0.2,
+      isSilicaDanger: silicaSat > 100
+    };
+  }, [waterData, systemConfig]);
+
+  const handleInputChange = (key, val) => {
+    setPretreatment({ ...pretreatment, [key]: val });
+  };
+
+  const cardStyle = { background: 'white', padding: '20px', borderRadius: '8px', border: '1px solid #c2d1df', marginBottom: '20px' };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
       
-      {/* DOSAGE INPUTS */}
+      {/* CHEMICAL INPUTS */}
       <div style={cardStyle}>
-        <div style={headerStyle}>Chemical Dosage Settings</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+        <h3 style={{ marginTop: 0, color: '#002f5d' }}>Pre-Treatment Dosing</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
           <div>
-            <label style={{ fontSize: '0.8rem', display: 'block' }}>Antiscalant Dose (mg/L)</label>
+            <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Antiscalant (mg/L)</label>
             <input 
+              style={{ width: '100%', padding: '8px' }} 
               type="number" 
-              step="0.1" 
-              value={pretreatment?.antiscalantDose || ''} 
+              value={pretreatment.antiscalantDose} 
               onChange={(e) => handleInputChange('antiscalantDose', e.target.value)} 
-              style={{ width: '100%', padding: '8px' }} 
             />
+            <p style={{ fontSize: '0.7rem', color: '#666' }}>Typical: 2.0 - 5.0 mg/L</p>
           </div>
           <div>
-            <label style={{ fontSize: '0.8rem', display: 'block' }}>SBS Dose (mg/L)</label>
+            <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Sodium Bisulfite (mg/L)</label>
             <input 
+              style={{ width: '100%', padding: '8px' }} 
               type="number" 
-              step="0.1" 
-              value={pretreatment?.sbsDose || ''} 
+              value={pretreatment.sbsDose} 
               onChange={(e) => handleInputChange('sbsDose', e.target.value)} 
-              style={{ width: '100%', padding: '8px' }} 
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: '0.8rem', display: 'block' }}>Free Chlorine at Inlet (mg/L)</label>
-            <input 
-              type="number" 
-              step="0.1" 
-              value={pretreatment?.chlorineInlet || ''} 
-              onChange={(e) => handleInputChange('chlorineInlet', e.target.value)} 
-              style={{ width: '100%', padding: '8px' }} 
             />
           </div>
         </div>
       </div>
 
-      {/* COST CALCULATOR */}
-      <div style={cardStyle}>
-        <div style={headerStyle}>Operational Cost Estimates (OPEX)</div>
-        <table style={{ width: '100%', fontSize: '0.9rem', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '2px solid #eee' }}>
-              <th>Chemical</th>
-              <th>Usage (kg/mo)</th>
-              <th>Price ($/kg)</th>
-              <th>Total ($)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td style={{ padding: '10px 0' }}>Antiscalant</td>
-              <td>{antiscalantUsage}</td>
-              <td>
-                <input type="number" value={chemicalPrices.antiscalant} onChange={(e) => handlePriceChange('antiscalant', e.target.value)} style={{ width: '50px' }} />
-              </td>
-              <td style={{ fontWeight: 'bold' }}>${antiscalantMonthlyCost}</td>
-            </tr>
-            <tr style={{ borderBottom: '1px solid #eee' }}>
-              <td style={{ padding: '10px 0' }}>SBS</td>
-              <td>{sbsUsage}</td>
-              <td>
-                <input type="number" value={chemicalPrices.sbs} onChange={(e) => handlePriceChange('sbs', e.target.value)} style={{ width: '50px' }} />
-              </td>
-              <td style={{ fontWeight: 'bold' }}>${sbsMonthlyCost}</td>
-            </tr>
-            <tr>
-              <td colSpan="3" style={{ textAlign: 'right', padding: '15px' }}><strong>Total Monthly Chemical Cost:</strong></td>
-              <td style={{ fontSize: '1.1rem', color: '#27ae60', fontWeight: 'bold' }}>${totalChemCost}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      {/* SCALING MONITOR */}
+      <div style={{ ...cardStyle, background: '#fff9e6', border: '2px solid #f39c12' }}>
+        <h4 style={{ marginTop: 0, color: '#856404' }}>Concentrate Scaling Risk</h4>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Concentration Factor:</span>
+            <span style={{ fontWeight: 'bold' }}>{scalingAnalysis.cf}x</span>
+          </div>
 
-      {/* TECHNICAL NOTE */}
-      <div style={{ ...cardStyle, gridColumn: 'span 2', background: '#eef6fc' }}>
-        <strong>💡 Pro Tip:</strong> 
-        Antiscalant dosage is calculated based on the <strong>Feed Flow</strong> of {feedFlow} m³/h. 
-        Higher recovery designs may require specialized antiscalants to prevent {waterData?.sio2 > 15 ? 'Silica scaling' : 'Calcium Carbonate scaling'}.
+          <div style={{ padding: '10px', background: scalingAnalysis.isLsiDanger ? '#f8d7da' : '#d4edda', borderRadius: '4px', border: `1px solid ${scalingAnalysis.isLsiDanger ? '#f5c6cb' : '#c3e6cb'}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+              <span>LSI (CaCO3):</span>
+              <span>{scalingAnalysis.lsi}</span>
+            </div>
+            <div style={{ fontSize: '0.75rem' }}>
+              {scalingAnalysis.isLsiDanger ? '⚠️ Scaling Likely. Increase Antiscalant or Acid.' : '✅ Safe (with Antiscalant)'}
+            </div>
+          </div>
+
+          <div style={{ padding: '10px', background: scalingAnalysis.isSilicaDanger ? '#f8d7da' : '#d4edda', borderRadius: '4px', border: `1px solid ${scalingAnalysis.isSilicaDanger ? '#f5c6cb' : '#c3e6cb'}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+              <span>Silica Saturation:</span>
+              <span>{scalingAnalysis.silicaSat}%</span>
+            </div>
+            <div style={{ fontSize: '0.75rem' }}>
+              {scalingAnalysis.isSilicaDanger ? '⚠️ High Risk! Limit Recovery or increase Temp.' : '✅ Under Solubility Limit'}
+            </div>
+          </div>
+        </div>
       </div>
 
     </div>
