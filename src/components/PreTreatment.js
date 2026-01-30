@@ -1,54 +1,116 @@
-import React from 'react';
+import React, { useState } from 'react';
 
-const PreTreatment = ({ waterData, pretreatment, setPretreatment, projection }) => {
-  const cardStyle = { background: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '20px' };
-  const inputStyle = { width: '100px', padding: '5px', marginLeft: '10px' };
+const PreTreatment = ({ waterData, pretreatment, setPretreatment, systemConfig }) => {
+  const [chemicalPrices, setChemicalPrices] = useState({ antiscalant: 4.5, sbs: 2.5 });
+
+  const handleInputChange = (key, value) => {
+    setPretreatment({ ...pretreatment, [key]: value });
+  };
+
+  const handlePriceChange = (key, value) => {
+    setChemicalPrices({ ...chemicalPrices, [key]: value });
+  };
+
+  // --- CALCULATIONS WITH SAFETY FALLBACKS ---
+  // If systemConfig is missing, we use 0 to prevent crashes
+  const feedFlow = Number(systemConfig?.feedFlow || 0); 
+  
+  // Safe calculation using optional chaining for pretreatment doses
+  const antiscalantUsage = ((feedFlow * (pretreatment?.antiscalantDose || 0) * 24 * 30) / 1000).toFixed(2);
+  const antiscalantMonthlyCost = (antiscalantUsage * (chemicalPrices?.antiscalant || 0)).toFixed(2);
+
+  const sbsUsage = ((feedFlow * (pretreatment?.sbsDose || 0) * 24 * 30) / 1000).toFixed(2);
+  const sbsMonthlyCost = (sbsUsage * (chemicalPrices?.sbs || 0)).toFixed(2);
+
+  const totalChemCost = (Number(antiscalantMonthlyCost) + Number(sbsMonthlyCost)).toFixed(2);
+
+  const cardStyle = { background: 'white', padding: '15px', borderRadius: '4px', border: '1px solid #c2d1df', marginBottom: '20px' };
+  const headerStyle = { background: '#004a80', color: 'white', padding: '8px', margin: '-15px -15px 15px -15px', fontWeight: 'bold' };
 
   return (
-    <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-      <h2 style={{ color: '#2c3e50' }}>Chemical Pre-Treatment</h2>
-
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+      
+      {/* DOSAGE INPUTS */}
       <div style={cardStyle}>
-        <h3 style={{ color: '#005fa3', marginTop: 0 }}>Scale & Fouling Inhibition</h3>
-        <p style={{ fontSize: '0.9rem', color: '#666' }}>Antiscalants are injected to prevent $CaCO_3$ and $CaSO_4$ scaling on the membrane surface.</p>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <label>Antiscalant Dosage (mg/L):</label>
+        <div style={headerStyle}>Chemical Dosage Settings</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           <div>
-            <input type="number" value={pretreatment.antiscalantDose} 
-              onChange={(e) => setPretreatment({...pretreatment, antiscalantDose: parseFloat(e.target.value) || 0})} 
-              style={inputStyle} />
-            <span style={{ marginLeft: '20px', fontWeight: 'bold', color: '#27ae60' }}>{projection.antiscalantKgDay} kg/day</span>
+            <label style={{ fontSize: '0.8rem', display: 'block' }}>Antiscalant Dose (mg/L)</label>
+            <input 
+              type="number" 
+              step="0.1" 
+              value={pretreatment?.antiscalantDose || ''} 
+              onChange={(e) => handleInputChange('antiscalantDose', e.target.value)} 
+              style={{ width: '100%', padding: '8px' }} 
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '0.8rem', display: 'block' }}>SBS Dose (mg/L)</label>
+            <input 
+              type="number" 
+              step="0.1" 
+              value={pretreatment?.sbsDose || ''} 
+              onChange={(e) => handleInputChange('sbsDose', e.target.value)} 
+              style={{ width: '100%', padding: '8px' }} 
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '0.8rem', display: 'block' }}>Free Chlorine at Inlet (mg/L)</label>
+            <input 
+              type="number" 
+              step="0.1" 
+              value={pretreatment?.chlorineInlet || ''} 
+              onChange={(e) => handleInputChange('chlorineInlet', e.target.value)} 
+              style={{ width: '100%', padding: '8px' }} 
+            />
           </div>
         </div>
       </div>
 
+      {/* COST CALCULATOR */}
       <div style={cardStyle}>
-        <h3 style={{ color: '#e67e22', marginTop: 0 }}>Dechlorination (SBS)</h3>
-        <p style={{ fontSize: '0.9rem', color: '#666' }}>Polyamide membranes are destroyed by chlorine. Sodium Bisulfite (SBS) is used to neutralize it.</p>
-        <div style={{ marginBottom: '10px' }}>
-          <label>Free Chlorine in Feed (mg/L):</label>
-          <input type="number" value={pretreatment.chlorineInlet} 
-            onChange={(e) => setPretreatment({...pretreatment, chlorineInlet: parseFloat(e.target.value) || 0})} 
-            style={inputStyle} />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <label>SBS Target Dosage (mg/L):</label>
-          <div>
-            <input type="number" value={pretreatment.sbsDose} 
-              onChange={(e) => setPretreatment({...pretreatment, sbsDose: parseFloat(e.target.value) || 0})} 
-              style={inputStyle} />
-            <span style={{ marginLeft: '20px', fontWeight: 'bold', color: '#e67e22' }}>{projection.sbsKgDay} kg/day</span>
-          </div>
-        </div>
+        <div style={headerStyle}>Operational Cost Estimates (OPEX)</div>
+        <table style={{ width: '100%', fontSize: '0.9rem', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', borderBottom: '2px solid #eee' }}>
+              <th>Chemical</th>
+              <th>Usage (kg/mo)</th>
+              <th>Price ($/kg)</th>
+              <th>Total ($)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={{ padding: '10px 0' }}>Antiscalant</td>
+              <td>{antiscalantUsage}</td>
+              <td>
+                <input type="number" value={chemicalPrices.antiscalant} onChange={(e) => handlePriceChange('antiscalant', e.target.value)} style={{ width: '50px' }} />
+              </td>
+              <td style={{ fontWeight: 'bold' }}>${antiscalantMonthlyCost}</td>
+            </tr>
+            <tr style={{ borderBottom: '1px solid #eee' }}>
+              <td style={{ padding: '10px 0' }}>SBS</td>
+              <td>{sbsUsage}</td>
+              <td>
+                <input type="number" value={chemicalPrices.sbs} onChange={(e) => handlePriceChange('sbs', e.target.value)} style={{ width: '50px' }} />
+              </td>
+              <td style={{ fontWeight: 'bold' }}>${sbsMonthlyCost}</td>
+            </tr>
+            <tr>
+              <td colSpan="3" style={{ textAlign: 'right', padding: '15px' }}><strong>Total Monthly Chemical Cost:</strong></td>
+              <td style={{ fontSize: '1.1rem', color: '#27ae60', fontWeight: 'bold' }}>${totalChemCost}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <div style={{ ...cardStyle, background: '#fdf2f2', borderLeft: '5px solid #e74c3c' }}>
-        <strong>Engineering Alert:</strong> 
-        {pretreatment.chlorineInlet > 0 && pretreatment.sbsDose < (pretreatment.chlorineInlet * 1.5) ? 
-          <span style={{ color: '#c0392b' }}> ⚠️ Warning: SBS dose might be too low to fully neutralize Chlorine! Recommended 3:1 ratio.</span> : 
-          <span style={{ color: '#27ae60' }}> ✓ Chlorine neutralization is adequate.</span>
-        }
+      {/* TECHNICAL NOTE */}
+      <div style={{ ...cardStyle, gridColumn: 'span 2', background: '#eef6fc' }}>
+        <strong>💡 Pro Tip:</strong> 
+        Antiscalant dosage is calculated based on the <strong>Feed Flow</strong> of {feedFlow} m³/h. 
+        Higher recovery designs may require specialized antiscalants to prevent {waterData?.sio2 > 15 ? 'Silica scaling' : 'Calcium Carbonate scaling'}.
       </div>
+
     </div>
   );
 };
