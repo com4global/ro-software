@@ -1,6 +1,55 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 const SystemDesign = ({ membranes, systemConfig, setSystemConfig, projection, waterData, onRun }) => {
+  const [showMembraneModal, setShowMembraneModal] = useState(false);
+  const [selectedStageForMembrane, setSelectedStageForMembrane] = useState(1);
+  const [localPass1Stages, setLocalPass1Stages] = useState(null); // Local state for input while typing
+
+  // Get stages from systemConfig, always ensure 6 stages exist
+  const getStages = () => {
+    if (systemConfig.stages && systemConfig.stages.length === 6) {
+      return systemConfig.stages;
+    }
+    // Initialize with only Stage 1 active (vessels > 0), others have 0
+    const stage1Vessels = systemConfig.stage1Vessels || 4;
+    return [
+      { membraneModel: systemConfig.membraneModel || 'espa2ld', elementsPerVessel: systemConfig.elementsPerVessel || 6, vessels: stage1Vessels },
+      { membraneModel: systemConfig.membraneModel || 'espa2ld', elementsPerVessel: systemConfig.elementsPerVessel || 6, vessels: 0 },
+      { membraneModel: systemConfig.membraneModel || 'espa2ld', elementsPerVessel: systemConfig.elementsPerVessel || 6, vessels: 0 },
+      { membraneModel: systemConfig.membraneModel || 'espa2ld', elementsPerVessel: systemConfig.elementsPerVessel || 6, vessels: 0 },
+      { membraneModel: systemConfig.membraneModel || 'espa2ld', elementsPerVessel: systemConfig.elementsPerVessel || 6, vessels: 0 },
+      { membraneModel: systemConfig.membraneModel || 'espa2ld', elementsPerVessel: systemConfig.elementsPerVessel || 6, vessels: 0 }
+    ];
+  };
+
+  const stages = getStages();
+  
+  // Use pass1Stages from systemConfig as source of truth, default to 1
+  // This is the CONTROLLING value - it determines how many stages are active
+  const pass1Stages = (systemConfig.pass1Stages !== undefined && systemConfig.pass1Stages >= 1 && systemConfig.pass1Stages <= 6)
+    ? systemConfig.pass1Stages 
+    : 1; // Default to 1 stage initially
+
+  // Initialize stages in systemConfig if not present
+  useEffect(() => {
+    if (!systemConfig.stages || systemConfig.stages.length !== 6) {
+      const initialStages = getStages();
+      setSystemConfig(prev => ({
+        ...prev,
+        stages: initialStages,
+        pass1Stages: prev.pass1Stages !== undefined ? prev.pass1Stages : 1
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sync localPass1Stages when systemConfig.pass1Stages changes externally
+  useEffect(() => {
+    if (localPass1Stages !== null && systemConfig.pass1Stages !== localPass1Stages) {
+      setLocalPass1Stages(null); // Clear local state to show the actual value
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemConfig.pass1Stages]);
 
   const handleInputChange = (key, value) => {
     const resetsDesign = [
@@ -13,6 +62,126 @@ const SystemDesign = ({ membranes, systemConfig, setSystemConfig, projection, wa
       'membraneModel'
     ].includes(key);
     setSystemConfig({ ...systemConfig, [key]: value, ...(resetsDesign ? { designCalculated: false } : {}) });
+  };
+
+  const handleStageChange = (stageIndex, field, value) => {
+    const currentStages = systemConfig.stages || stages;
+    const newStages = [...currentStages];
+    newStages[stageIndex] = { ...newStages[stageIndex], [field]: value };
+    
+    // Preserve designCalculated state - if it was already calculated, keep it calculated
+    // so flux updates in real-time when vessels/stages change
+    const keepCalculated = systemConfig.designCalculated;
+    
+    // If vessels changed for a stage beyond pass1Stages, auto-increase pass1Stages
+    if (field === 'vessels') {
+      const vesselValue = parseInt(value) || 0;
+      if (vesselValue > 0 && stageIndex >= pass1Stages) {
+        // User is setting vessels for a stage beyond current pass1Stages
+        // Auto-increase pass1Stages to include this stage
+        const newPass1Stages = stageIndex + 1;
+        // Copy Stage 1 values to any new stages that were added
+        const stage1Values = { ...currentStages[0] };
+        for (let i = pass1Stages; i < newPass1Stages; i++) {
+          if (i !== stageIndex) { // Don't overwrite the stage being edited
+            newStages[i] = { ...stage1Values, vessels: 0 };
+          }
+        }
+        
+        setSystemConfig({ 
+          ...systemConfig, 
+          stages: newStages,
+          stage1Vessels: newStages[0].vessels,
+          stage2Vessels: newStages[1]?.vessels || 0,
+          elementsPerVessel: newStages[0].elementsPerVessel,
+          membraneModel: newStages[0].membraneModel,
+          pass1Stages: newPass1Stages, // Auto-update pass1Stages
+          designCalculated: keepCalculated // Preserve calculated state
+        });
+        return;
+      }
+    }
+    
+    setSystemConfig({ 
+      ...systemConfig, 
+      stages: newStages,
+      stage1Vessels: newStages[0].vessels,
+      stage2Vessels: newStages[1]?.vessels || 0,
+      elementsPerVessel: newStages[0].elementsPerVessel,
+      membraneModel: newStages[0].membraneModel,
+      // Keep pass1Stages unchanged
+      designCalculated: keepCalculated // Preserve calculated state so flux updates in real-time
+    });
+  };
+
+  const handlePass1StagesChange = (value) => {
+    // value can be a number or string
+    const numStages = Math.min(Math.max(parseInt(value) || 1, 1), 6);
+    const currentPass1Stages = systemConfig.pass1Stages !== undefined ? systemConfig.pass1Stages : pass1Stages;
+    
+    if (numStages === currentPass1Stages) {
+      return; // No change needed
+    }
+    
+    // Get current stages from systemConfig
+    const currentStages = systemConfig.stages || stages;
+    const newStages = [...currentStages];
+    const stage1Values = { ...currentStages[0] };
+    
+    if (numStages > currentPass1Stages) {
+      // Increasing: Add new stages by copying Stage 1 values
+      // New stages get Stage 1 membrane and elements, but vessels start at 0
+      for (let i = currentPass1Stages; i < numStages; i++) {
+        newStages[i] = { 
+          ...stage1Values, 
+          vessels: 0  // New stages start with 0 vessels
+        };
+      }
+    } else {
+      // Decreasing: FORCE clear vessels for stages beyond numStages
+      // This ensures Pass 1 stages CONTROLS the number of active stages
+      for (let i = numStages; i < 6; i++) {
+        newStages[i] = { 
+          ...stage1Values, 
+          vessels: 0  // Force to 0 for stages beyond numStages
+        };
+      }
+    }
+    
+    // Preserve designCalculated state - if it was already calculated, keep it calculated
+    // so flux updates in real-time when stages change
+    const keepCalculated = systemConfig.designCalculated;
+    
+    // Update systemConfig with new pass1Stages value
+    setSystemConfig(prev => ({
+      ...prev,
+      stages: newStages,
+      stage1Vessels: newStages[0].vessels,
+      stage2Vessels: newStages[1]?.vessels || 0,
+      pass1Stages: numStages, // Store in config as source of truth - this CONTROLS active stages
+      designCalculated: keepCalculated // Preserve calculated state so flux updates in real-time
+    }));
+  };
+
+  const handleMembraneSelect = (membraneId) => {
+    const currentStages = systemConfig.stages || stages;
+    const newStages = [...currentStages];
+    newStages[selectedStageForMembrane - 1] = { 
+      ...newStages[selectedStageForMembrane - 1], 
+      membraneModel: membraneId 
+    };
+    setSystemConfig({ 
+      ...systemConfig, 
+      stages: newStages,
+      membraneModel: newStages[0].membraneModel,
+      designCalculated: false 
+    });
+    setShowMembraneModal(false);
+  };
+
+  const openMembraneModal = (stageNum) => {
+    setSelectedStageForMembrane(stageNum);
+    setShowMembraneModal(true);
   };
 
   const handleFlowUnitChange = (nextUnit) => {
@@ -167,25 +336,226 @@ const SystemDesign = ({ membranes, systemConfig, setSystemConfig, projection, wa
       {/* MIDDLE SECTION: SPECIFICATIONS & RUN BUTTON */}
       <div style={panelStyle}>
         <div style={headerStyle}>System Specifications</div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={rowStyle}>
-              <span style={{width: '120px'}}>Membrane type</span>
-              <select style={{width: '150px'}} value={systemConfig.membraneModel} onChange={e => handleInputChange('membraneModel', e.target.value)}>
-                {membranes.map(m => <option key={m.id} value={m.id}>{m.name.toUpperCase()}</option>)}
-              </select>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px' }}>
+          <div style={{ flex: 1 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', background: 'white' }}>
+              <thead>
+                <tr style={{ background: '#f0f0f0' }}>
+                  <th style={{ border: '1px solid #ccc', padding: '8px', textAlign: 'left', width: '120px' }}></th>
+                  {Array.from({ length: pass1Stages }, (_, i) => i + 1).map(stageNum => (
+                    <th key={stageNum} style={{ border: '1px solid #ccc', padding: '8px', textAlign: 'center' }}>
+                      Stage {stageNum}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ border: '1px solid #ccc', padding: '8px', fontWeight: 'bold' }}>Membrane type</td>
+                  {Array.from({ length: pass1Stages }, (_, i) => i + 1).map(stageNum => {
+                    const currentStages = systemConfig.stages || stages;
+                    const stage = currentStages[stageNum - 1];
+                    const selectedMembrane = membranes.find(m => m.id === stage?.membraneModel) || membranes[0];
+                    return (
+                      <td key={stageNum} style={{ border: '1px solid #ccc', padding: '8px', textAlign: 'center' }}>
+                        <input
+                          type="text"
+                          value={selectedMembrane?.name || ''}
+                          onClick={() => openMembraneModal(stageNum)}
+                          readOnly
+                          style={{
+                            width: '100%',
+                            padding: '4px',
+                            textAlign: 'center',
+                            border: '1px solid #999',
+                            background: '#fffacd',
+                            cursor: 'pointer',
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  <td style={{ border: '1px solid #ccc', padding: '8px', fontWeight: 'bold' }}>Membranes/vessel</td>
+                  {Array.from({ length: pass1Stages }, (_, i) => i + 1).map(stageNum => {
+                    const currentStages = systemConfig.stages || stages;
+                    const stage = currentStages[stageNum - 1];
+                    return (
+                      <td key={stageNum} style={{ border: '1px solid #ccc', padding: '8px', textAlign: 'center' }}>
+                        <input
+                          type="number"
+                          value={stage?.elementsPerVessel || ''}
+                          onChange={(e) => handleStageChange(stageNum - 1, 'elementsPerVessel', parseInt(e.target.value) || 0)}
+                          style={{
+                            width: '100%',
+                            padding: '4px',
+                            textAlign: 'center',
+                            border: '1px solid #999',
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr>
+                  <td style={{ border: '1px solid #ccc', padding: '8px', fontWeight: 'bold' }}>No. of vessels</td>
+                  {Array.from({ length: pass1Stages }, (_, i) => i + 1).map(stageNum => {
+                    const currentStages = systemConfig.stages || stages;
+                    const stage = currentStages[stageNum - 1];
+                    const hasError = (stage?.vessels || 0) === 0;
+                    return (
+                      <td key={stageNum} style={{ border: '1px solid #ccc', padding: '8px', textAlign: 'center' }}>
+                        <input
+                          type="number"
+                          value={stage?.vessels || ''}
+                          onChange={(e) => handleStageChange(stageNum - 1, 'vessels', parseInt(e.target.value) || 0)}
+                          style={{
+                            width: '100%',
+                            padding: '4px',
+                            textAlign: 'center',
+                            border: hasError ? '2px solid red' : '1px solid #999',
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              </tbody>
+            </table>
+            <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.75rem' }}>
+              <span>Pass 1 stages:</span>
+              <input
+                type="number"
+                min="1"
+                max="6"
+                step="1"
+                value={localPass1Stages !== null ? localPass1Stages : pass1Stages}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  // Allow typing any value temporarily
+                  if (val === '') {
+                    setLocalPass1Stages('');
+                    return;
+                  }
+                  const numVal = parseInt(val);
+                  if (!isNaN(numVal)) {
+                    setLocalPass1Stages(numVal);
+                    // Update immediately if valid
+                    if (numVal >= 1 && numVal <= 6) {
+                      handlePass1StagesChange(numVal);
+                    }
+                  }
+                }}
+                onBlur={(e) => {
+                  // Validate and apply on blur
+                  const val = parseInt(e.target.value);
+                  if (isNaN(val) || val < 1 || val > 6) {
+                    // Invalid, restore to current pass1Stages
+                    setLocalPass1Stages(null);
+                  } else {
+                    const clamped = Math.min(Math.max(val, 1), 6);
+                    setLocalPass1Stages(null);
+                    if (clamped !== pass1Stages) {
+                      handlePass1StagesChange(clamped);
+                    }
+                  }
+                }}
+                onKeyDown={(e) => {
+                  // Handle arrow keys
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const newVal = Math.min(pass1Stages + 1, 6);
+                    setLocalPass1Stages(null);
+                    handlePass1StagesChange(newVal);
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const newVal = Math.max(pass1Stages - 1, 1);
+                    setLocalPass1Stages(null);
+                    handlePass1StagesChange(newVal);
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.target.blur(); // Trigger onBlur validation
+                  }
+                }}
+                style={{ width: '60px', padding: '4px', textAlign: 'center', border: '1px solid #999' }}
+              />
             </div>
-            <div style={rowStyle}><span>Membranes/vessel</span> <input style={inputStyle} value={systemConfig.elementsPerVessel} onChange={e => handleInputChange('elementsPerVessel', e.target.value)} /></div>
-            <div style={rowStyle}><span>No. of vessels</span> <input style={inputStyle} value={systemConfig.stage1Vessels} onChange={e => handleInputChange('stage1Vessels', e.target.value)} /></div>
           </div>
           <button onClick={onRun} style={{ 
             background: 'linear-gradient(#3498db, #2980b9)', color: 'white', padding: '10px 30px', 
-            borderRadius: '20px', border: '1px solid #004a80', cursor: 'pointer', fontWeight: 'bold' 
+            borderRadius: '20px', border: '1px solid #004a80', cursor: 'pointer', fontWeight: 'bold',
+            alignSelf: 'flex-start'
           }}>
             Recalculate array
           </button>
         </div>
       </div>
+
+      {/* MEMBRANE SELECTION MODAL */}
+      {showMembraneModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }} onClick={() => setShowMembraneModal(false)}>
+          <div style={{
+            background: 'white',
+            padding: '20px',
+            borderRadius: '8px',
+            maxWidth: '600px',
+            maxHeight: '80vh',
+            overflow: 'auto',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 style={{ margin: 0 }}>Select Membrane Type for Stage {selectedStageForMembrane}</h3>
+              <button onClick={() => setShowMembraneModal(false)} style={{
+                background: '#e74c3c',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '5px 15px',
+                cursor: 'pointer',
+                fontSize: '0.9rem'
+              }}>×</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px' }}>
+              {membranes.map(membrane => (
+                <button
+                  key={membrane.id}
+                  onClick={() => handleMembraneSelect(membrane.id)}
+                  style={{
+                    padding: '10px',
+                    border: '2px solid #004a80',
+                    borderRadius: '4px',
+                    background: 'white',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    fontSize: '0.85rem',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => e.target.style.background = '#e3f2fd'}
+                  onMouseOut={(e) => e.target.style.background = 'white'}
+                >
+                  <div style={{ fontWeight: 'bold' }}>{membrane.name}</div>
+                  <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '4px' }}>{membrane.type}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* BOTTOM SECTION: CALCULATION RESULTS (VISIBLE ONLY AFTER RUN) */}
       {projection && (

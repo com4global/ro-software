@@ -37,6 +37,15 @@ const App = () => {
     stage2Vessels: 0,
     elementsPerVessel: 6,
     membraneModel: 'espa2ld',
+    pass1Stages: 1, // Initially only 1 stage is active
+    stages: [
+      { membraneModel: 'espa2ld', elementsPerVessel: 6, vessels: 4 },
+      { membraneModel: 'espa2ld', elementsPerVessel: 6, vessels: 0 },
+      { membraneModel: 'espa2ld', elementsPerVessel: 6, vessels: 0 },
+      { membraneModel: 'espa2ld', elementsPerVessel: 6, vessels: 0 },
+      { membraneModel: 'espa2ld', elementsPerVessel: 6, vessels: 0 },
+      { membraneModel: 'espa2ld', elementsPerVessel: 6, vessels: 0 }
+    ],
 
     // Flux display
     fluxUnit: 'gfd', // gfd | lmh
@@ -115,16 +124,74 @@ const App = () => {
     const perTrainFeed_m3h = perTrainProduct_m3h / recovery;
     const perTrainConc_m3h = perTrainFeed_m3h - perTrainProduct_m3h;
 
-    const activeMem = membranes.find(m => m.id === systemConfig.membraneModel) || membranes[0];
-    const totalElements = (Number(systemConfig.stage1Vessels) + Number(systemConfig.stage2Vessels)) * Number(systemConfig.elementsPerVessel);
-    const totalArea_ft2 = totalElements * Number(activeMem.area || 0);
+    // Calculate total elements across all active stages
+    // Use stages array if available, otherwise fall back to legacy stage1Vessels/stage2Vessels
+    let totalElements = 0;
+    if (systemConfig.stages && systemConfig.stages.length > 0) {
+      // Sum elements from all active stages (up to pass1Stages)
+      const pass1Stages = Math.min(Math.max(Number(systemConfig.pass1Stages) || 1, 1), 6);
+      for (let i = 0; i < pass1Stages; i++) {
+        const stage = systemConfig.stages[i];
+        if (stage) {
+          const stageVessels = Number(stage.vessels) || 0;
+          const stageElementsPerVessel = Number(stage.elementsPerVessel) || 0;
+          totalElements += stageVessels * stageElementsPerVessel;
+        }
+      }
+    } else {
+      // Legacy fallback: use stage1Vessels and stage2Vessels
+      totalElements = (Number(systemConfig.stage1Vessels) + Number(systemConfig.stage2Vessels)) * Number(systemConfig.elementsPerVessel);
+    }
+    
+    // Get membrane area - use first stage's membrane if stages array exists, otherwise use membraneModel
+    let activeMem;
+    if (systemConfig.stages && systemConfig.stages.length > 0 && systemConfig.stages[0]) {
+      activeMem = membranes.find(m => m.id === systemConfig.stages[0].membraneModel) || membranes[0];
+    } else {
+      activeMem = membranes.find(m => m.id === systemConfig.membraneModel) || membranes[0];
+    }
+    
+    // Ensure we have a valid membrane with area
+    const membraneArea = Number(activeMem?.area) || 400; // Default to 400 ft² if not found
+    const totalArea_ft2 = totalElements * membraneArea;
     const totalArea_m2 = totalArea_ft2 * 0.09290304;
 
     const perTrainProduct_gpd = perTrainProduct_m3h * M3H_TO_GPD;
-    const rawFluxGFD = totalArea_ft2 > 0 ? (perTrainProduct_gpd / totalArea_ft2) : 0;
-    const rawFluxLMH = totalArea_m2 > 0 ? ((perTrainProduct_m3h * 1000) / totalArea_m2) : 0;
+    
+    // Calculate flux - always calculate, but only display if designCalculated is true
+    let rawFluxGFD = 0;
+    let rawFluxLMH = 0;
+    if (totalArea_ft2 > 0 && perTrainProduct_gpd > 0) {
+      rawFluxGFD = perTrainProduct_gpd / totalArea_ft2;
+    }
+    if (totalArea_m2 > 0 && perTrainProduct_m3h > 0) {
+      rawFluxLMH = (perTrainProduct_m3h * 1000) / totalArea_m2;
+    }
+    
+    // Only show flux value if designCalculated is true, otherwise show 0
     const fluxGFD = systemConfig.designCalculated ? rawFluxGFD : 0;
     const fluxLMH = systemConfig.designCalculated ? rawFluxLMH : 0;
+    
+    // Debug logging to understand why flux is 0 (only log when calculated but still 0)
+    if (systemConfig.designCalculated && rawFluxGFD === 0 && rawFluxLMH === 0) {
+      console.warn('Flux is 0 after calculation! Debug info:');
+      console.log('  - designCalculated:', systemConfig.designCalculated);
+      console.log('  - totalElements:', totalElements);
+      console.log('  - membraneArea:', membraneArea);
+      console.log('  - totalArea_ft2:', totalArea_ft2);
+      console.log('  - totalArea_m2:', totalArea_m2);
+      console.log('  - perTrainProduct_gpd:', perTrainProduct_gpd);
+      console.log('  - perTrainProduct_m3h:', perTrainProduct_m3h);
+      console.log('  - rawFluxGFD:', rawFluxGFD);
+      console.log('  - rawFluxLMH:', rawFluxLMH);
+      console.log('  - pass1Stages:', systemConfig.pass1Stages);
+      console.log('  - stages:', systemConfig.stages?.map((s, i) => ({ 
+        stage: i + 1, 
+        vessels: s.vessels, 
+        elements: s.elementsPerVessel,
+        membrane: s.membraneModel 
+      })));
+    }
 
     // Check if only the unit changed (not the permeate flow value)
     // If so, use the stored base values and just reformat with new precision
