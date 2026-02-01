@@ -229,107 +229,86 @@ const SystemDesign = ({ membranes, systemConfig, setSystemConfig, projection, wa
   const inputStyle = { width: '70px', textAlign: 'right', border: '1px solid #999' };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', fontFamily: 'Arial' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       
-      {/* TOP SECTION: INPUT PANELS */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 0.8fr', gap: '10px' }}>
+      {/* INPUT GRID */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.8fr', gap: '15px' }}>
+        
+        {/* PANEL: TRAIN INFORMATION */}
         <div style={panelStyle}>
-          <div style={headerStyle}>Train Information</div>
-          <div style={rowStyle}><span>Feed pH</span> <input style={inputStyle} value={systemConfig.feedPh} onChange={e => handleInputChange('feedPh', e.target.value)} /></div>
-          <div style={rowStyle}><span>Permeate recovery %</span> <input style={inputStyle} value={systemConfig.recovery} onChange={e => handleInputChange('recovery', e.target.value)} /></div>
+          <div style={headerStyle}>Train Information (Pass 1)</div>
+          <div style={rowStyle}>
+            <span>Feed pH</span>
+            <input style={inputStyle} type="number" value={systemConfig.feedPh} onChange={(e) => handleInputChange('feedPh', e.target.value)} />
+          </div>
+          <div style={rowStyle}>
+            <span>Permeate recovery %</span>
+            <input style={inputStyle} type="number" value={systemConfig.recovery} onChange={(e) => handleInputChange('recovery', e.target.value)} />
+          </div>
           <div style={rowStyle}>
             <span>Permeate flow</span>
-            <div style={{display:'flex', gap:'2px'}}>
-              <select style={{fontSize:'0.7rem'}} value={systemConfig.flowUnit} onChange={e => handleFlowUnitChange(e.target.value)}>
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <select style={{fontSize: '0.75rem'}} value={systemConfig.flowUnit} onChange={(e) => handleInputChange('flowUnit', e.target.value)}>
                 <option value="gpm">gpm</option>
-                <option value="gpd">gpd</option>
-                <option value="mgd">mgd</option>
-                <option value="migd">migd</option>
                 <option value="m3/h">m3/h</option>
-                <option value="m3/d">m3/d</option>
-                <option value="mld">mld</option>
+                <option value="gpd">gpd</option>
               </select>
-              <input style={inputStyle} value={systemConfig.permeateFlow} onChange={e => handleInputChange('permeateFlow', e.target.value)} />
+              <input style={inputStyle} type="number" value={systemConfig.permeateFlow} onChange={(e) => handleInputChange('permeateFlow', e.target.value)} />
             </div>
           </div>
           <div style={rowStyle}>
-            <span>Average flux</span>
-            <div style={{display:'flex', gap:'4px', alignItems:'center'}}>
-              <select style={{fontSize:'0.7rem'}} value={systemConfig.fluxUnit || 'gfd'} onChange={e => handleInputChange('fluxUnit', e.target.value)}>
-                <option value="gfd">gfd</option>
-                <option value="lmh">lmh</option>
-              </select>
-              <div style={{...inputStyle, background: '#eee'}}>
-                {formatFluxDisplay(
-                  systemConfig.fluxUnit === 'lmh' ? (projection?.fluxLMH ?? '0.000') : (projection?.fluxGFD ?? '0.000'),
-                  systemConfig.flowUnit || 'gpm'
-                )}
-              </div>
-            </div>
+            <span>Average flux (gfd)</span>
+            <input style={readOnlyStyle} value={projection.fluxGfd} readOnly />
           </div>
           <div style={rowStyle}>
             <span>Feed flow</span>
-            <div style={{display:'flex', gap:'4px', alignItems:'center'}}>
-              <div style={{...inputStyle, background: '#eee'}}>{projection?.feedFlow ?? '0.00'}</div>
-              <span style={{ fontSize: '0.7rem', color: '#333' }}>{systemConfig.flowUnit || 'gpm'}</span>
-            </div>
+            <input style={readOnlyStyle} value={projection.feedFlow} readOnly />
           </div>
           <div style={rowStyle}>
             <span>Concentrate flow</span>
-            <div style={{display:'flex', gap:'4px', alignItems:'center'}}>
-              <div style={{...inputStyle, background: '#eee'}}>{projection?.concentrateFlow ?? '0.00'}</div>
-              <span style={{ fontSize: '0.7rem', color: '#333' }}>{systemConfig.flowUnit || 'gpm'}</span>
-            </div>
+            <input style={readOnlyStyle} value={projection.concentrateFlow} readOnly />
           </div>
         </div>
 
+        {/* PANEL: CHEMICALS & AGEING */}
         <div style={panelStyle}>
-          <div style={headerStyle}>Conditions</div>
-          <div style={{ ...rowStyle, fontWeight: 'bold', marginTop: '2px' }}><span>Pass 1</span></div>
+          <div style={headerStyle}>Chemicals & Ageing</div>
           <div style={rowStyle}>
-            <span>Chemical</span>
-            <select style={{ ...inputStyle, width: '110px', textAlign: 'left' }} value={systemConfig.chemical} onChange={e => handleInputChange('chemical', e.target.value)}>
-              <option value="None">None</option>
-              <option value="Antiscalant">Antiscalant</option>
-              <option value="SBS">SBS</option>
-              <option value="Acid">Acid</option>
-              <option value="Caustic">Caustic</option>
-            </select>
-          </div>
-          <div style={rowStyle}>
-            <span>Chemical concentration</span>
-            <div style={{display:'flex', gap:'4px', alignItems:'center'}}>
-              <input style={inputStyle} value={systemConfig.chemicalConcentration} onChange={e => handleInputChange('chemicalConcentration', e.target.value)} />
-              <span style={{ fontSize: '0.7rem', color: '#333' }}>%</span>
-            </div>
-          </div>
-          <div style={rowStyle}>
-            <span>Chemical dose</span>
-            <div style={{display:'flex', gap:'4px', alignItems:'center'}}>
-              <input style={inputStyle} value={systemConfig.chemicalDose} onChange={e => handleInputChange('chemicalDose', e.target.value)} />
-              <select style={{fontSize:'0.7rem'}} value={systemConfig.doseUnit} onChange={e => handleInputChange('doseUnit', e.target.value)}>
+            <span>Chemical Dose</span>
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <select style={{fontSize: '0.75rem'}} value={systemConfig.doseUnit} onChange={(e) => handleInputChange('doseUnit', e.target.value)}>
                 <option value="mg/l">mg/l</option>
                 <option value="lb/hr">lb/hr</option>
                 <option value="kg/hr">kg/hr</option>
               </select>
+              <input style={inputStyle} type="number" value={systemConfig.chemicalDose} onChange={(e) => handleInputChange('chemicalDose', e.target.value)} />
             </div>
           </div>
-          <div style={rowStyle}><span>Membrane age (years)</span> <input style={inputStyle} value={systemConfig.membraneAge} onChange={e => handleInputChange('membraneAge', e.target.value)} /></div>
-          <div style={rowStyle}><span>Flux decline %/yr</span> <input style={inputStyle} value={systemConfig.fluxDeclinePerYear} onChange={e => handleInputChange('fluxDeclinePerYear', e.target.value)} /></div>
-          <div style={rowStyle}><span>Fouling factor</span> <input style={inputStyle} value={systemConfig.foulingFactor} onChange={e => handleInputChange('foulingFactor', e.target.value)} /></div>
-          <div style={rowStyle}><span>SP increase % per year</span> <input style={inputStyle} value={systemConfig.spIncreasePerYear} onChange={e => handleInputChange('spIncreasePerYear', e.target.value)} /></div>
+          <div style={rowStyle}>
+            <span>Membrane age (years)</span>
+            <input style={inputStyle} type="number" value={systemConfig.membraneAge} onChange={(e) => handleInputChange('membraneAge', e.target.value)} />
+          </div>
+          <div style={rowStyle}>
+            <span>Flux decline %, per year</span>
+            <input style={inputStyle} type="number" value={systemConfig.fluxDeclinePerYear} onChange={(e) => handleInputChange('fluxDeclinePerYear', e.target.value)} />
+          </div>
+          <div style={rowStyle}>
+            <span>Fouling factor</span>
+            <input style={inputStyle} type="number" value={systemConfig.foulingFactor} onChange={(e) => handleInputChange('foulingFactor', e.target.value)} />
+          </div>
         </div>
 
+        {/* PANEL: SYSTEM */}
         <div style={panelStyle}>
           <div style={headerStyle}>System</div>
           <div style={rowStyle}>
-            <span>Total plant product flow</span>
-            <div style={{display:'flex', gap:'4px', alignItems:'center'}}>
-              <input style={{...inputStyle, background:'#eee'}} value={projection?.totalPlantProductFlowDisplay ?? '0.00'} readOnly />
-              <span style={{ fontSize: '0.7rem', color: '#333' }}>{systemConfig.flowUnit || 'gpm'}</span>
-            </div>
+            <span>Total plant flow ({systemConfig.flowUnit})</span>
+            <input style={readOnlyStyle} value={projection.totalPlantFlow} readOnly />
           </div>
-          <div style={rowStyle}><span>Number of trains</span> <input style={inputStyle} value={systemConfig.numTrains} onChange={e => handleInputChange('numTrains', e.target.value)} /></div>
+          <div style={rowStyle}>
+            <span>Number of trains</span>
+            <input style={inputStyle} type="number" value={systemConfig.numTrains} onChange={(e) => handleInputChange('numTrains', e.target.value)} />
+          </div>
         </div>
       </div>
 

@@ -1,118 +1,125 @@
 import React from 'react';
 
 const Report = ({ 
-  waterData = {}, 
-  systemConfig = {}, 
-  projection = {}, 
-  postTreatment = {}, 
-  pretreatment = {}, 
-  projectNotes = "", 
+  waterData, 
+  systemConfig, 
+  projection, 
+  pretreatment, 
+  postTreatment, 
+  projectNotes, 
   setProjectNotes, 
-  snapshots = [] 
+  snapshots, 
+  setSnapshots 
 }) => {
-  const reportDate = new Date().toLocaleDateString();
-  const safeSnapshots = Array.isArray(snapshots) ? snapshots : [];
 
-  // --- SAFETY FALLBACKS ---
-  // We use the OR operator || to ensure we don't multiply by 'undefined'
-  // Use total plant feed (m3/h) from the main projection engine
-  const feedFlow = Number(projection?.totalFeedFlowM3h || 0);
-  const asDose = Number(pretreatment?.antiscalantDose || 0);
-  const causticDose = Number(postTreatment?.causticDose || 0);
+  // --- OPEX CALCULATIONS ---
+  const feedFlow = Number(systemConfig.feedFlow);
+  const permeateFlow = Number(projection.permeateFlow);
+  
+  // 1. Energy Cost per m3
+  const hourlyEnergyCost = (Number(projection.monthlyEnergyCost) / 30 / 24);
+  const energyPerM3 = permeateFlow > 0 ? hourlyEnergyCost / permeateFlow : 0;
 
-  // Monthly Calculations
-  const monthlyAS = ((feedFlow * asDose * 24 * 30) / 1000).toFixed(1);
-  const monthlyCaustic = ((feedFlow * causticDose * 24 * 30) / 1000).toFixed(1);
+  // 2. Chemical Costs (Assumed unit costs: AS=$3.00/kg, Caustic=$1.50/kg)
+  const asCostHourly = (feedFlow * Number(pretreatment.antiscalantDose) * 3.00) / 1000;
+  const causticCostHourly = (permeateFlow * Number(postTreatment.causticDose) * 1.50) / 1000;
+  const chemPerM3 = permeateFlow > 0 ? (asCostHourly + causticCostHourly) / permeateFlow : 0;
 
-  const sectionStyle = { marginBottom: '25px', border: '1px solid #004a80', borderRadius: '4px', overflow: 'hidden', backgroundColor: '#fff' };
-  const headerStyle = { backgroundColor: '#004a80', color: '#fff', padding: '12px 15px', fontWeight: 'bold' };
+  const totalOpexPerM3 = (energyPerM3 + chemPerM3).toFixed(3);
+
+  const deleteSnapshot = (id) => {
+    if (window.confirm("Delete this snapshot?")) {
+      setSnapshots(snapshots.filter(s => s.id !== id));
+    }
+  };
+
+  const sectionStyle = {
+    background: 'white', padding: '20px', borderRadius: '8px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.05)', marginBottom: '20px'
+  };
 
   return (
-    <div id="printable-report" style={{ maxWidth: '1100px', margin: '0 auto', padding: '40px', fontFamily: 'Arial' }}>
-      <style>{`@page { size: landscape; margin: 15mm; } @media print { .no-print { display: none !important; } }`}</style>
+    <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h2 style={{ color: '#002f5d', margin: 0 }}>Engineering & OPEX Report</h2>
+        <button onClick={() => window.print()} style={{ padding: '8px 16px', background: '#34495e', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+          Print to PDF
+        </button>
+      </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '4px solid #004a80', paddingBottom: '10px', marginBottom: '20px' }}>
-        <h1 style={{ margin: 0 }}>TECHNICAL SUBMITTAL</h1>
-        <div style={{ textAlign: 'right' }}>
-          <p style={{ margin: '2px 0' }}><strong>Project:</strong> {waterData?.projectName || 'New Project'}</p>
-          <p style={{ margin: '2px 0' }}><strong>Date:</strong> {reportDate}</p>
+      {/* FINANCIAL SUMMARY CARD */}
+      <div style={{ ...sectionStyle, background: '#2c3e50', color: 'white' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', textAlign: 'center' }}>
+          <div>
+            <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>ENERGY / $m^3$</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>${energyPerM3.toFixed(3)}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>CHEMICALS / $m^3$</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>${chemPerM3.toFixed(3)}</div>
+          </div>
+          <div style={{ borderLeft: '1px solid #456' }}>
+            <div style={{ fontSize: '0.8rem', color: '#f39c12', fontWeight: 'bold' }}>TOTAL OPEX / $m^3$</div>
+            <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#f39c12' }}>${totalOpexPerM3}</div>
+          </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '25px' }}>
-        <div>
-          {/* OPEX SUMMARY */}
-          <div style={sectionStyle}>
-            <div style={headerStyle}>Monthly Operational Cost Estimator</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <tbody>
-                <tr style={{ borderBottom: '1px solid #eee' }}>
-                  <td style={{ padding: '12px' }}>⚡ Electricity ({systemConfig?.energyCostPerKwh || 0}/kWh)</td>
-                  <td style={{ textAlign: 'right', fontWeight: 'bold' }}>${projection?.monthlyEnergyCost || 0}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid #eee' }}>
-                  <td style={{ padding: '12px' }}>🧪 Antiscalant ({monthlyAS} kg)</td>
-                  <td style={{ textAlign: 'right' }}>Calculated by Dose</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: '12px' }}>🧪 Caustic Soda ({monthlyCaustic} kg)</td>
-                  <td style={{ textAlign: 'right' }}>Calculated by Dose</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* SNAPSHOT COMPARISON */}
-          {safeSnapshots.length > 0 && (
-            <div style={sectionStyle}>
-              <div style={headerStyle}>Design Alternatives Comparison</div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-                <thead>
-                  <tr style={{ background: '#f4f4f4' }}>
-                    <th style={{ padding: '8px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Metric</th>
-                    {safeSnapshots.map((s, i) => <th key={i} style={{ borderBottom: '1px solid #ddd' }}>{s.name}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>Flux (GFD)</td>
-                    {safeSnapshots.map((s, i) => (
-                      <td key={i} style={{ textAlign: 'center', borderBottom: '1px solid #eee' }}>
-                        {s.results?.fluxGFD || 'N/A'}
-                      </td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
+      {/* SYSTEM PERFORMANCE */}
+      <div style={sectionStyle}>
+        <h3 style={{ marginTop: 0, color: '#004a80' }}>System Performance</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '8px 0' }}>Feed Flow</td><td style={{ textAlign: 'right' }}>{systemConfig.feedFlow} $m^3/h$</td></tr>
+              <tr><td style={{ padding: '8px 0' }}>Permeate Flow</td><td style={{ textAlign: 'right' }}>{projection.permeateFlow} $m^3/h$</td></tr>
+              <tr><td style={{ padding: '8px 0' }}>Recovery</td><td style={{ textAlign: 'right' }}>{systemConfig.recovery}%</td></tr>
+            </tbody>
+          </table>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '8px 0' }}>Design Flux</td><td style={{ textAlign: 'right' }}>{projection.fluxGFD} GFD</td></tr>
+              <tr><td style={{ padding: '8px 0' }}>Feed Pressure</td><td style={{ textAlign: 'right' }}>{projection.pumpPressure} bar</td></tr>
+              <tr><td style={{ padding: '8px 0' }}>Temperature</td><td style={{ textAlign: 'right' }}>{waterData.temp} °C</td></tr>
+            </tbody>
+          </table>
         </div>
+      </div>
 
-        <div>
-          <div style={sectionStyle}>
-            <div style={headerStyle}>System Performance</div>
-            <div style={{ padding: '15px' }}>
-              <p>Feed Pressure: <strong>{projection?.pumpPressure || 0} bar</strong></p>
-              <p>Final pH: <strong>{projection?.finalPh || 'N/A'}</strong></p>
-              <p>LSI Post-Treatment: <strong>{projection?.postTreatmentLsi || 'N/A'}</strong></p>
-            </div>
-          </div>    
-          <textarea 
-            className="no-print" 
-            value={projectNotes} 
-            onChange={(e) => setProjectNotes(e.target.value)}
-            style={{ width: '100%', height: '100px', marginBottom: '10px', padding: '10px', boxSizing: 'border-box' }}
-            placeholder="Add notes..."
-          />
-          
-          <button 
-            onClick={() => window.print()} 
-            className="no-print" 
-            style={{ width: '100%', padding: '15px', background: '#004a80', color: '#fff', cursor: 'pointer', fontWeight: 'bold', border: 'none', borderRadius: '4px' }}
-          >
-            PRINT REPORT
-          </button>
+      {/* SNAPSHOTS */}
+      {snapshots.length > 0 && (
+        <div style={sectionStyle}>
+          <h3 style={{ marginTop: 0, color: '#9b59b6' }}>Design Snapshots</h3>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', color: '#666', fontSize: '0.8rem' }}>
+                <th>NAME</th><th>FLUX</th><th>PRESSURE</th><th>OPEX/$m^3$</th><th>ACTION</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snapshots.map(s => (
+                <tr key={s.id}>
+                  <td style={{ padding: '10px 0' }}><strong>{s.name}</strong></td>
+                  <td>{s.results.fluxGFD}</td>
+                  <td>{s.results.pumpPressure}</td>
+                  <td>${(s.results.monthlyEnergyCost / 30 / 24 / s.results.permeateFlow).toFixed(3)}</td>
+                  <td><button onClick={() => deleteSnapshot(s.id)} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}>Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+      )}
+
+      {/* PROJECT NOTES */}
+      <div style={sectionStyle}>
+        <h3 style={{ marginTop: 0, color: '#004a80' }}>Engineering Notes</h3>
+        <textarea 
+          style={{ width: '100%', height: '100px', padding: '10px', borderRadius: '4px', border: '1px solid #ddd' }}
+          value={projectNotes}
+          onChange={(e) => setProjectNotes(e.target.value)}
+          placeholder="Enter site specific observations..."
+        />
       </div>
     </div>
   );
