@@ -14,12 +14,60 @@ const App = () => {
   const [isGuidelineOpen, setIsGuidelineOpen] = useState(false);
   const fileInputRef = useRef(null);
 
+  const FLOW_TO_M3H = {
+    gpm: 0.2271,
+    gpd: 0.0001577,
+    mgd: 157.725,
+    migd: 189.27,
+    'm3/h': 1,
+    'm3/d': 1 / 24,
+    mld: 41.667
+  };
+
+  const DEFAULT_SYSTEM_CONFIG = {
+    // Inputs (follow IMSDesign layout: System-level total + trains; Train values are calculated)
+    feedPh: 7.0,
+    recovery: 55,
+    flowUnit: 'gpm', // gpm/gpd/mgd/migd/m3/h/m3/d/mld
+    permeateFlow: 77, // train permeate flow in selected unit
+    numTrains: 1,
+
+    // Array specification
+    stage1Vessels: 4,
+    stage2Vessels: 0,
+    elementsPerVessel: 6,
+    membraneModel: 'espa2ld',
+
+    // Flux display
+    fluxUnit: 'gfd', // gfd | lmh
+
+    // Hydranautics behavior: flux stays 0 until "Recalculate array"
+    designCalculated: false,
+
+    // Conditions
+    membraneAge: 0,
+    fluxDeclinePerYear: 5,
+    foulingFactor: 1,
+    spIncreasePerYear: 7,
+
+    // Chemical (as per IMSDesign "Pass 1")
+    chemical: 'None',
+    chemicalConcentration: 100, // %
+    chemicalDose: 0,
+    doseUnit: 'mg/l', // mg/l | lb/hr | kg/hr
+
+    // Economics
+    energyCostPerKwh: 0.12
+  };
+
   // --- 1. STATE MANAGEMENT ---
   const [snapshots, setSnapshots] = useState([]); 
   const [membranes, setMembranes] = useState([
     { id: 'espa2ld', name: 'ESPA2-LD', area: 400, aValue: 0.18, rejection: 99.7, type: 'Brackish' },
     { id: 'cpa3', name: 'CPA3', area: 400, aValue: 0.12, rejection: 99.7, type: 'Brackish' },
-    { id: 'swc5ld', name: 'SWC5-LD', area: 400, aValue: 0.06, rejection: 99.8, type: 'Seawater' }
+    { id: 'swc5ld', name: 'SWC5-LD', area: 400, aValue: 0.06, rejection: 99.8, type: 'Seawater' },
+    // Legacy 4" element example (4040) used in IMSDesign screenshots
+    { id: 'lfc3ld4040', name: 'LFC3-LD4040', area: 80, aValue: 0.12, rejection: 99.7, type: 'Low Fouling' }
   ]); 
   
   const [projectNotes, setProjectNotes] = useState(""); 
@@ -30,10 +78,7 @@ const App = () => {
     hco3: 250, so4: 100, cl: 300, no3: 25, sio2: 20
   });
 
-  const [systemConfig, setSystemConfig] = useState({
-    feedFlow: 100, recovery: 75, stage1Vessels: 4, stage2Vessels: 2,
-    elementsPerVessel: 6, membraneModel: 'espa2ld', energyCostPerKwh: 0.12 
-  });
+  const [systemConfig, setSystemConfig] = useState(DEFAULT_SYSTEM_CONFIG);
 
   const [pretreatment, setPretreatment] = useState({ antiscalantDose: 3.5, sbsDose: 2.0 });
   const [postTreatment, setPostTreatment] = useState({ causticDose: 2.0 });
@@ -41,35 +86,176 @@ const App = () => {
   const [projection, setProjection] = useState({ 
     fluxGFD: 0, pumpPressure: 0, monthlyEnergyCost: 0, permeateFlow: 0 
   });
+  
+  // Store base numeric values (without unit conversion) to preserve them when unit changes
+  const baseValuesRef = useRef({ 
+    permeate: null, 
+    feed: null, 
+    concentrate: null, 
+    unit: null 
+  });
 
   // --- 2. MASTER CALCULATION ENGINE ---
   useEffect(() => {
+    const M3H_TO_GPD = 24 * 264.172052; // m3/h -> gal/day
+
+    const unit = FLOW_TO_M3H[systemConfig.flowUnit] ? systemConfig.flowUnit : 'gpm';
+    const unitFactor = FLOW_TO_M3H[unit] ?? 1;
+
+    const trains = Math.max(Number(systemConfig.numTrains) || 1, 1);
+    const trainPermeateInput = Number(systemConfig.permeateFlow) || 0;
+    const perTrainProduct_m3h = trainPermeateInput * unitFactor;
+    const totalProduct_m3h = perTrainProduct_m3h * trains;
+
+    // Clamp recovery to avoid Infinity
+    const recoveryPct = Math.min(Math.max(Number(systemConfig.recovery) || 15, 1), 99);
+    const recovery = recoveryPct / 100;
+
+    // Legacy train mass balance (as in screenshot 2)
+    const perTrainFeed_m3h = perTrainProduct_m3h / recovery;
+    const perTrainConc_m3h = perTrainFeed_m3h - perTrainProduct_m3h;
+
     const activeMem = membranes.find(m => m.id === systemConfig.membraneModel) || membranes[0];
     const totalElements = (Number(systemConfig.stage1Vessels) + Number(systemConfig.stage2Vessels)) * Number(systemConfig.elementsPerVessel);
-    const totalArea = totalElements * activeMem.area;
-    const feed = Number(systemConfig.feedFlow);
-    const rec = Number(systemConfig.recovery) / 100;
-    const permeate = feed * rec;
+    const totalArea_ft2 = totalElements * Number(activeMem.area || 0);
+    const totalArea_m2 = totalArea_ft2 * 0.09290304;
+
+    const perTrainProduct_gpd = perTrainProduct_m3h * M3H_TO_GPD;
+    const rawFluxGFD = totalArea_ft2 > 0 ? (perTrainProduct_gpd / totalArea_ft2) : 0;
+    const rawFluxLMH = totalArea_m2 > 0 ? ((perTrainProduct_m3h * 1000) / totalArea_m2) : 0;
+    const fluxGFD = systemConfig.designCalculated ? rawFluxGFD : 0;
+    const fluxLMH = systemConfig.designCalculated ? rawFluxLMH : 0;
+
+    // Check if only the unit changed (not the permeate flow value)
+    // If so, use the stored base values and just reformat with new precision
+    const permeateNumeric = Number(trainPermeateInput) || 0;
+    const prevPermeate = baseValuesRef.current.permeate;
+    const prevUnit = baseValuesRef.current.unit;
+    const onlyUnitChanged = prevUnit !== null && 
+                            prevUnit !== unit &&
+                            prevPermeate !== null &&
+                            Math.abs(prevPermeate - permeateNumeric) < 0.0001;
+    
+    // Back-convert for display (train-level, same unit as UI)
+    let perTrainProduct_display, perTrainFeed_display, perTrainConc_display;
+    
+    if (onlyUnitChanged && baseValuesRef.current.feed !== null) {
+      // Only unit changed - use stored values, just reformat
+      perTrainProduct_display = baseValuesRef.current.permeate;
+      perTrainFeed_display = baseValuesRef.current.feed;
+      perTrainConc_display = baseValuesRef.current.concentrate;
+    } else {
+      // Permeate flow changed or first calculation - calculate normally
+      perTrainProduct_display = trainPermeateInput;
+      perTrainFeed_display = perTrainFeed_m3h / unitFactor;
+      perTrainConc_display = perTrainConc_m3h / unitFactor;
+      
+      // Store base values for next unit change
+      baseValuesRef.current = {
+        permeate: permeateNumeric,
+        feed: perTrainFeed_display,
+        concentrate: perTrainConc_display,
+        unit: unit
+      };
+    }
+    
+    const totalPlantProduct_display = perTrainProduct_display * trains;
+
+    // Format flows based on unit type (matching Hydranautics precision exactly)
+    // gpm, m3/h: 2 decimals (e.g., 166.70, 66.70)
+    // gpd, m3/d: 1 decimal (e.g., 166.7, 66.7)
+    // mgd, migd, mld: 3 decimals (e.g., 166.700, 66.700)
+    const getFlowDecimals = (flowUnit) => {
+      if (['gpm', 'm3/h'].includes(flowUnit)) return 2;
+      if (['gpd', 'm3/d'].includes(flowUnit)) return 1;
+      if (['mgd', 'migd', 'mld'].includes(flowUnit)) return 3;
+      return 2; // default
+    };
+    const flowDecimals = getFlowDecimals(unit);
+
+    // Format function that matches Hydranautics display behavior
+    // When unit changes, we want to keep the same numeric values, just change precision
+    const formatFlow = (value, decimals) => {
+      // Parse the value to get the raw number, then format with new precision
+      const numValue = typeof value === 'string' ? parseFloat(value) : value;
+      return Number(numValue).toFixed(decimals);
+    };
+
+    // Chemical usage (basis: train feed flow)
+    const dose = Number(systemConfig.chemicalDose) || 0;
+    const concPct = Math.min(Math.max(Number(systemConfig.chemicalConcentration) || 100, 1), 100);
+    let chemicalActive_kg_hr = 0;
+    if (systemConfig.doseUnit === 'mg/l') {
+      // mg/L * m3/h -> kg/h
+      chemicalActive_kg_hr = (dose * perTrainFeed_m3h) / 1000;
+    } else if (systemConfig.doseUnit === 'lb/hr') {
+      chemicalActive_kg_hr = dose * 0.45359237;
+    } else if (systemConfig.doseUnit === 'kg/hr') {
+      chemicalActive_kg_hr = dose;
+    }
+    const chemicalSolution_kg_hr = chemicalActive_kg_hr / (concPct / 100);
+
+    // Keep the existing (simplified) pressure/energy model, but make it consistent with the new flow basis.
     const TCF = Math.exp(2640 * (1 / 298.15 - 1 / (Number(waterData.temp) + 273.15)));
-    const CF = 1 / (1 - rec);
-    const flux = (permeate * 10.5) / (totalArea / 400); 
-
+    const CF = 1 / (1 - recovery);
     const tds = (Number(waterData.na) + Number(waterData.cl) + Number(waterData.so4));
-    const osmoticP = (tds * CF * 0.76) / 1000; 
-    const pumpPressure = (flux / (TCF * activeMem.aValue)) + osmoticP + 1.2;
+    const osmoticP = (tds * CF * 0.76) / 1000;
 
-    const powerKw = (pumpPressure * feed) / (36.7 * 0.75); 
+    // Ageing / fouling / SP increase: approximate Hydranautics behaviour
+    const membraneAge = Math.max(Number(systemConfig.membraneAge) || 0, 0);
+    const fluxDeclinePct = Math.min(Math.max(Number(systemConfig.fluxDeclinePerYear) || 0, 0), 99);
+    const spIncreasePct = Math.min(Math.max(Number(systemConfig.spIncreasePerYear) || 0, 0), 200);
+    const foulingFactor = Math.max(Number(systemConfig.foulingFactor) || 1, 1);
+
+    const aBase = Number(activeMem.aValue) || 0.12;
+    const aEffective = aBase * Math.pow(1 - fluxDeclinePct / 100, membraneAge);
+    const spFactor = Math.pow(1 + spIncreasePct / 100, membraneAge);
+
+    // Pump model expects a flux-like term; use GFD computed above.
+    const pressureTerm = (fluxGFD / (TCF * (aEffective || aBase))) * foulingFactor;
+    const pumpPressure = (pressureTerm + osmoticP + 1.2) * spFactor;
+
+    // Use total plant feed for power (m3/h)
+    const totalFeed_m3h = perTrainFeed_m3h * trains;
+    const powerKw = (pumpPressure * totalFeed_m3h) / (36.7 * 0.75);
     const monthlyEnergy = powerKw * 24 * 30 * Number(systemConfig.energyCostPerKwh);
 
+    // Format flux: Always show 0 with appropriate decimals based on unit when not calculated
+    // The actual value stays 0, only the decimal precision changes with unit
+    const formatFlux = (value, isCalculated, flowUnit) => {
+      if (!isCalculated) {
+        // Match the decimal precision of the flow unit
+        const fluxDecimals = getFlowDecimals(flowUnit);
+        return '0.' + '0'.repeat(fluxDecimals); // e.g., '0.00', '0.0', '0.000'
+      }
+      return Number(value).toFixed(1); // 1 decimal when calculated
+    };
+
     setProjection({
+      // Train-level flows (match IMSDesign Train Information box with unit-based precision)
+      permeateFlow: formatFlow(perTrainProduct_display, flowDecimals),
+      feedFlow: formatFlow(perTrainFeed_display, flowDecimals),
+      concentrateFlow: formatFlow(perTrainConc_display, flowDecimals),
+
+      // System-level flows (used by other tabs/models)
+      totalPlantProductFlowM3h: totalProduct_m3h.toFixed(3),
+      totalPlantProductFlowDisplay: formatFlow(totalPlantProduct_display, flowDecimals),
+      flowUnit: unit,
+      feedFlowM3h: perTrainFeed_m3h.toFixed(3),
+      totalFeedFlowM3h: totalFeed_m3h.toFixed(3),
+
+      // Core KPIs - flux formatting matches Hydranautics (0 with unit-based decimals when not calculated)
+      fluxGFD: formatFlux(fluxGFD, systemConfig.designCalculated, unit),
+      fluxLMH: formatFlux(fluxLMH, systemConfig.designCalculated, unit),
       pumpPressure: pumpPressure.toFixed(1),
-      fluxGFD: flux.toFixed(1),
       monthlyEnergyCost: monthlyEnergy.toFixed(2),
-      permeateFlow: permeate.toFixed(1),
+
+      chemicalActiveKgHr: chemicalActive_kg_hr.toFixed(3),
+      chemicalSolutionKgHr: chemicalSolution_kg_hr.toFixed(3),
+
       tcf: TCF.toFixed(2),
       activeMembrane: activeMem,
-      totalElements: totalElements,
-      concentrateFlow: (feed - permeate).toFixed(1)
+      totalElements: totalElements
     });
   }, [waterData, systemConfig, membranes]);
 
@@ -80,7 +266,13 @@ const App = () => {
       try {
         const p = JSON.parse(saved);
         setWaterData(p.waterData);
-        setSystemConfig(p.systemConfig);
+        const merged = { ...DEFAULT_SYSTEM_CONFIG, ...(p.systemConfig || {}) };
+        // Back-compat: older saves had totalPlantProductFlow instead of permeateFlow
+        if ((merged.permeateFlow === undefined || merged.permeateFlow === null) && merged.totalPlantProductFlow != null) {
+          const trains = Math.max(Number(merged.numTrains) || 1, 1);
+          merged.permeateFlow = Number(merged.totalPlantProductFlow) / trains;
+        }
+        setSystemConfig(merged);
         setMembranes(p.membranes || membranes);
         setProjectNotes(p.projectNotes || "");
         setSnapshots(p.snapshots || []);
@@ -136,7 +328,7 @@ const App = () => {
       try {
         const data = JSON.parse(evt.target.result);
         if (data.waterData) setWaterData(data.waterData);
-        if (data.systemConfig) setSystemConfig(data.systemConfig);
+        if (data.systemConfig) setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, ...(data.systemConfig || {}) });
         if (data.snapshots) setSnapshots(data.snapshots);
         alert("Success: Design Loaded!");
       } catch (err) { alert("Error: Invalid File Format"); }
@@ -174,7 +366,16 @@ const App = () => {
       <main style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
         {activeTab === 'analysis' && <WaterAnalysis waterData={waterData} setWaterData={setWaterData} />}
         {activeTab === 'pretreatment' && <PreTreatment waterData={waterData} pretreatment={pretreatment} setPretreatment={setPretreatment} systemConfig={systemConfig} />}
-        {activeTab === 'design' && <SystemDesign membranes={membranes} systemConfig={systemConfig} setSystemConfig={setSystemConfig} projection={projection} waterData={waterData} />}
+        {activeTab === 'design' && (
+          <SystemDesign
+            membranes={membranes}
+            systemConfig={systemConfig}
+            setSystemConfig={setSystemConfig}
+            projection={projection}
+            waterData={waterData}
+            onRun={() => setSystemConfig(c => ({ ...c, designCalculated: true }))}
+          />
+        )}
         {activeTab === 'post' && <PostTreatment projection={projection} postTreatment={postTreatment} setPostTreatment={setPostTreatment} systemConfig={systemConfig} />}
         {activeTab === 'report' && (
           <Report 
@@ -189,7 +390,14 @@ const App = () => {
             setSnapshots={setSnapshots}
           />
         )}
-        {activeTab === 'database' && <MembraneEditor membranes={membranes} setMembranes={setMembranes} />}
+        {activeTab === 'database' && (
+          <MembraneEditor
+            membranes={membranes}
+            setMembranes={setMembranes}
+            systemConfig={systemConfig}
+            setSystemConfig={setSystemConfig}
+          />
+        )}
       </main>
 
       <footer style={{ background: '#fff', borderTop: '1px solid #ddd', padding: '5px 20px', display: 'flex', gap: '20px', fontSize: '0.75rem', color: '#666' }}>

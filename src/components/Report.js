@@ -15,7 +15,8 @@ const Report = ({
 
   // --- SAFETY FALLBACKS ---
   // We use the OR operator || to ensure we don't multiply by 'undefined'
-  const feedFlow = Number(systemConfig?.feedFlow || 0);
+  // Use total plant feed (m3/h) from the main projection engine
+  const feedFlow = Number(projection?.totalFeedFlowM3h || 0);
   const asDose = Number(pretreatment?.antiscalantDose || 0);
   const causticDose = Number(postTreatment?.causticDose || 0);
 

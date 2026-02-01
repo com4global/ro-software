@@ -3,11 +3,11 @@ import React from 'react';
 const ValidationBanner = ({ projection, systemConfig, waterData }) => {
   const flux = Number(projection.fluxGFD || 0);
   const recovery = Number(systemConfig.recovery || 0);
-  const feedFlow = Number(systemConfig.feedFlow || 0);
   const s1Vessels = Number(systemConfig.stage1Vessels || 1);
   
   // Engineering Rule: Max feed flow per 8" vessel is ~17 m3/h
-  const flowPerVessel = feedFlow / s1Vessels;
+  const feedFlowM3h = Number(projection.feedFlowM3h || 0); // train-level feed in m3/h
+  const flowPerVessel = feedFlowM3h / s1Vessels;
 
   const checks = [
     {

@@ -3,7 +3,8 @@ import React, { useMemo } from 'react';
 const PostTreatment = ({ projection, postTreatment, setPretreatment, setPostTreatment, systemConfig }) => {
 
   const postAnalysis = useMemo(() => {
-    const permeateFlow = Number(systemConfig.feedFlow || 0) * (Number(systemConfig.recovery || 0) / 100);
+    // Use total plant product flow (m3/h) from the main projection engine
+    const permeateFlow = Number(projection?.totalPlantProductFlowM3h || 0);
     const causticDose = Number(postTreatment.causticDose || 0);
     
     // 1. Post-RO pH Estimation
@@ -27,7 +28,7 @@ const PostTreatment = ({ projection, postTreatment, setPretreatment, setPostTrea
       monthlyUsageKg: monthlyUsageKg.toFixed(1),
       permeateFlow: permeateFlow.toFixed(1)
     };
-  }, [postTreatment, systemConfig]);
+  }, [postTreatment, projection]);
 
   const handleInputChange = (key, val) => {
     setPostTreatment({ ...postTreatment, [key]: val });

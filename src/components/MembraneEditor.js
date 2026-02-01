@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 
-const MembraneEditor = ({ membranes, setMembranes }) => {
+const MembraneEditor = ({ membranes, setMembranes, systemConfig, setSystemConfig }) => {
   const [newMembrane, setNewMembrane] = useState({ 
     id: '', 
     name: '', 
     area: 400, 
-    type: 'Brackish' 
+    type: 'Brackish',
+    aValue: 0.12,
+    rejection: 99.7
   });
 
   const handleAdd = (e) => {
@@ -22,7 +24,7 @@ const MembraneEditor = ({ membranes, setMembranes }) => {
     }
 
     setMembranes([...membranes, newMembrane]);
-    setNewMembrane({ id: '', name: '', area: 400, type: 'Brackish' });
+    setNewMembrane({ id: '', name: '', area: 400, type: 'Brackish', aValue: 0.12, rejection: 99.7 });
   };
 
   const handleDelete = (id) => {
@@ -66,6 +68,22 @@ const MembraneEditor = ({ membranes, setMembranes }) => {
             onChange={e => setNewMembrane({...newMembrane, area: parseFloat(e.target.value) || 0})} 
             style={{ ...inputStyle, maxWidth: '100px' }} 
           />
+          <input 
+            type="number" 
+            step="0.01"
+            placeholder="A-value" 
+            value={newMembrane.aValue} 
+            onChange={e => setNewMembrane({...newMembrane, aValue: parseFloat(e.target.value) || 0})} 
+            style={{ ...inputStyle, maxWidth: '90px' }} 
+          />
+          <input 
+            type="number" 
+            step="0.1"
+            placeholder="Rej (%)" 
+            value={newMembrane.rejection} 
+            onChange={e => setNewMembrane({...newMembrane, rejection: parseFloat(e.target.value) || 0})} 
+            style={{ ...inputStyle, maxWidth: '90px' }} 
+          />
           <select 
             value={newMembrane.type} 
             onChange={e => setNewMembrane({...newMembrane, type: e.target.value})} 
@@ -89,16 +107,28 @@ const MembraneEditor = ({ membranes, setMembranes }) => {
               <th style={thStyle}>ID</th>
               <th style={thStyle}>Model</th>
               <th style={thStyle}>Area (ft²)</th>
+              <th style={thStyle}>A-value</th>
+              <th style={thStyle}>Rej (%)</th>
               <th style={thStyle}>Type</th>
               <th style={thStyle}>Action</th>
             </tr>
           </thead>
           <tbody>
             {membranes.map(m => (
-              <tr key={m.id}>
+              <tr
+                key={m.id}
+                onClick={() => setSystemConfig?.({ ...systemConfig, membraneModel: m.id })}
+                style={{
+                  cursor: 'pointer',
+                  background: systemConfig?.membraneModel === m.id ? '#ebf5ff' : 'transparent'
+                }}
+                title="Click to use this membrane in Design"
+              >
                 <td style={tdStyle}><code>{m.id}</code></td>
                 <td style={tdStyle}>{m.name}</td>
                 <td style={tdStyle}>{m.area}</td>
+                <td style={tdStyle}>{m.aValue ?? ''}</td>
+                <td style={tdStyle}>{m.rejection ?? ''}</td>
                 <td style={tdStyle}>
                    <span style={{ 
                      padding: '2px 8px', 
@@ -122,6 +152,9 @@ const MembraneEditor = ({ membranes, setMembranes }) => {
             ))}
           </tbody>
         </table>
+        <div style={{ marginTop: '10px', fontSize: '0.75rem', color: '#666' }}>
+          Tip: click a row to set it as the active membrane for the Design tab.
+        </div>
       </div>
     </div>
   );
